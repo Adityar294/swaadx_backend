@@ -17,7 +17,7 @@ app.post("/whatsapp", (req, res) => {
 
   let reply = "";
 
-  // Initialize user
+  // 1️⃣ Initialize user
   if (!userState[from]) {
     userState[from] = {
       step: "START",
@@ -27,6 +27,24 @@ app.post("/whatsapp", (req, res) => {
   }
 
   const state = userState[from];
+
+  // 2️⃣ GLOBAL COMMANDS (PLACE IT HERE 👈)
+  if (message.toLowerCase() === "confirm") {
+    if (state.cart.length === 0) {
+      reply = "Your cart is empty 🛒";
+    } else {
+      reply = "Order confirmed 🎉";
+      delete userState[from]; // reset session
+    }
+
+    return res.send(`
+      <Response>
+        <Message>${reply}</Message>
+      </Response>
+    `);
+  }
+
+  // 3️⃣ STEP-BASED LOGIC STARTS HERE
 
   // START
   if (state.step === "START") {
@@ -64,7 +82,6 @@ Reply with item number`;
         state.cart.forEach((i, idx) => {
           reply += `${idx + 1}. ${i.item} × ${i.qty}\n`;
         });
-        reply += "\nType *hi* to order more or *confirm*";
       }
     }
     else {
@@ -77,11 +94,11 @@ Reply with item number`;
     const qty = parseInt(message);
 
     if (isNaN(qty) || qty <= 0) {
-      reply = "Please enter a valid quantity (number)";
+      reply = "Please enter a valid quantity";
     } else {
       state.cart.push({
         item: state.currentItem,
-        qty: qty
+        qty
       });
 
       state.currentItem = null;
@@ -92,12 +109,6 @@ Reply with item number`;
 Type item number to add more
 or type *cart* to view cart`;
     }
-  }
-
-  // CONFIRM
-  else if (message.toLowerCase() === "confirm") {
-    reply = "Order confirmed 🎉 (DB coming next)";
-    delete userState[from]; // reset
   }
 
   res.send(`
