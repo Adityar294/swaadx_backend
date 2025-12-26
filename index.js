@@ -1,3 +1,14 @@
+const { Pool } = require("pg");
+
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
+  ssl: { rejectUnauthorized: false }
+});
+
 const express = require("express");
 const bodyParser = require("body-parser");
 const userState = {};
@@ -11,7 +22,7 @@ app.get("/", (req, res) => {
 });
 
 // WhatsApp webhook
-app.post("/whatsapp", (req, res) => {
+app.post("/whatsapp", async (req, res) => {
   const from = req.body.From;
   const message = (req.body.Body || "").trim();
 
@@ -29,20 +40,31 @@ app.post("/whatsapp", (req, res) => {
   const state = userState[from];
 
   // 2️⃣ GLOBAL COMMANDS (PLACE IT HERE 👈)
-  if (message.toLowerCase() === "confirm") {
-    if (state.cart.length === 0) {
-      reply = "Your cart is empty 🛒";
-    } else {
-      reply = "Order confirmed 🎉";
-      delete userState[from]; // reset session
-    }
+if (message.toLowerCase() === "confirm") {
+  if (state.cart.length === 0) {
+    reply = "Your cart is empty 🛒";
+  } else {
+    try {
+      await pool.query(
+        "INSERT INTO orders (phone, items) VALUES ($1, $2)",
+        [from, JSON.stringify(state.cart)]
+      );
 
-    return res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
-    `);
+      reply = "Order confirmed 🎉";
+      delete userState[from];
+    } catch (err) {
+      console.error(err);
+      reply = "Something went wrong. Please try again.";
+    }
   }
+
+  return res.send(`
+    <Response>
+      <Message>${reply}</Message>
+    </Response>
+  `);
+}
+
 
   // 3️⃣ STEP-BASED LOGIC STARTS HERE
 
