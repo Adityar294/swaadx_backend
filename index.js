@@ -43,9 +43,15 @@ if (message.toLowerCase() === "confirm") {
   } else {
     try {
       await pool.query(
-        "INSERT INTO orders (phone, items) VALUES ($1, $2)",
-        [from, JSON.stringify(state.cart)]
-      );
+        `INSERT INTO orders (phone, items, status, order_total_items)
+        VALUES ($1, $2, $3, $4)`,
+        [
+          from,
+          JSON.stringify(state.cart),
+          "NEW",
+          state.cart.reduce((sum, i) => sum + i.qty, 0)
+  ]
+);
 
       reply = "Order confirmed 🎉";
       delete userState[from];
