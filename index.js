@@ -137,10 +137,14 @@ app.post("/whatsapp", async (req, res) => {
 
         const taxAmount = Number((subtotalAmount * TAX_RATE).toFixed(2));
         const totalAmount = Number((subtotalAmount + taxAmount).toFixed(2));
+        const orderTotalItems = state.cart.reduce(
+          (sum, item) => sum + Number(item.qty),
+          0
+        );
 
         await pool.query(
           `INSERT INTO orders
-           (restaurant_id, phone, items, status,
+           (restaurant_id, phone, items, status, order_total_items
             subtotal_amount, tax_amount, total_amount)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [
@@ -148,6 +152,7 @@ app.post("/whatsapp", async (req, res) => {
             from,
             JSON.stringify(state.cart),
             "NEW",
+            orderTotalItems,
             subtotalAmount,
             taxAmount,
             totalAmount
