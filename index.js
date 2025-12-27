@@ -142,22 +142,24 @@ app.post("/whatsapp", async (req, res) => {
           0
         );
 
-        await pool.query(
-          `INSERT INTO orders
-           (restaurant_id, phone, items, status, order_total_items,
-            subtotal_amount, tax_amount, total_amount)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            RESTAURANT_ID,
-            from,
-            JSON.stringify(state.cart),
-            "NEW",
-            orderTotalItems,
-            subtotalAmount,
-            taxAmount,
-            totalAmount
-          ]
-        );
+await pool.query(
+  `INSERT INTO orders
+   (restaurant_id, phone, items, status,
+    order_total_items,
+    subtotal_amount, tax_amount, total_amount)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+  [
+    RESTAURANT_ID,
+    from,
+    JSON.stringify(state.cart),
+    "NEW",
+    orderTotalItems,
+    subtotalAmount,
+    taxAmount,
+    totalAmount
+  ]
+);
+
 
         reply =
 `Order confirmed 🎉
