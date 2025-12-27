@@ -5,9 +5,8 @@ const { Pool } = require("pg");
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-
 /* =======================
-   DATABASE CONFIG
+   DATABASE
    ======================= */
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -17,11 +16,12 @@ const pool = new Pool({
 /* =======================
    CONSTANTS
    ======================= */
-const RESTAURANT_ID = 1; // single restaurant for MVP
-const SESSION_EXPIRY_MS = 30 * 60 * 1000; // 30 mins
+const RESTAURANT_ID = 1;
+const TAX_RATE = 0.05;
+const SESSION_EXPIRY_MS = 30 * 60 * 1000;
 
 /* =======================
-   IN-MEMORY SESSION STATE
+   SESSION STORE
    ======================= */
 const userState = {};
 
@@ -29,29 +29,28 @@ const userState = {};
    HELPERS
    ======================= */
 
-// Parse "1-3" → { itemNo: 1, qty: 3 }
-function parseItemQty(input) {
-  const match = input.match(/^(\d+)\s*-\s*(\d+)$/);
+// parse "1-2"
+function parseItemQty(text) {
+  const match = text.match(/^(\d+)\s*-\s*(\d+)$/);
   if (!match) return null;
 
   return {
-    itemNo: parseInt(match[1], 10),
-    qty: parseInt(match[2], 10)
+    itemNo: Number(match[1]),
+    qty: Number(match[2])
   };
 }
 
-// Build menu text from DB rows
-function buildMenuText(menuRows) {
-  let text = "Menu 🍽️\n";
-  menuRows.forEach(row => {
-    text += `${row.item_no}️⃣ ${row.item_name}\n`;
+function buildMenuText(rows) {
+  let msg = "Menu 🍽️\n";
+  rows.forEach(r => {
+    msg += `${r.item_no}️⃣ ${r.item_name} - ₹${r.price}\n`;
   });
-  text += "\nOrder using *itemNo-qty*\nExample: *1-2*";
-  return text;
+  msg += "\nOrder using *itemNo-qty*\nExample: *1-2*";
+  return msg;
 }
 
 /* =======================
-   HEALTH CHECK
+   HEALTH
    ======================= */
 app.get("/", (req, res) => {
   res.send("SwaadX backend running");
@@ -63,10 +62,9 @@ app.get("/", (req, res) => {
 app.post("/whatsapp", async (req, res) => {
   const from = req.body.From;
   const message = (req.body.Body || "").trim().toLowerCase();
-
   let reply = "";
 
-  /* -------- INIT SESSION -------- */
+  /* ---------- INIT SESSION ---------- */
   if (!userState[from]) {
     userState[from] = {
       step: "START",
@@ -83,124 +81,112 @@ app.post("/whatsapp", async (req, res) => {
      GLOBAL COMMANDS
      ======================= */
 
-  // RESTART / CANCEL
+  // restart / cancel
   if (message === "restart" || message === "cancel") {
     delete userState[from];
     reply = "Session cleared ✅\nType *hi* to start again";
 
     return res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
+      <Response><Message>${reply}</Message></Response>
     `);
   }
 
-  // CART
+  // cart
   if (message === "cart") {
     if (state.cart.length === 0) {
       reply = "Your cart is empty 🛒";
     } else {
       reply = "Your cart 🛒:\n";
       state.cart.forEach((i, idx) => {
-        reply += `${idx + 1}. ${i.item_name} × ${i.qty}\n`;
+        reply += `${idx + 1}. ${i.item_name} × ${i.qty} = ₹${i.subtotal}\n`;
       });
       reply += "\nType *confirm* to place order";
     }
 
     return res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
+      <Response><Message>${reply}</Message></Response>
     `);
   }
 
-  // REMOVE ITEM (remove 1)
+  // remove item
   if (message.startsWith("remove ")) {
-    const idx = parseInt(message.split(" ")[1], 10) - 1;
+    const index = Number(message.split(" ")[1]) - 1;
 
-    if (isNaN(idx) || idx < 0 || idx >= state.cart.length) {
-      reply = "Invalid item number to remove ❌";
+    if (isNaN(index) || index < 0 || index >= state.cart.length) {
+      reply = "Invalid item number ❌";
     } else {
-      const removed = state.cart.splice(idx, 1);
+      const removed = state.cart.splice(index, 1);
       reply = `Removed ${removed[0].item_name} ❌`;
     }
 
     return res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
+      <Response><Message>${reply}</Message></Response>
     `);
   }
 
-  // CONFIRM ORDER
-if (message === "confirm") {
-  if (state.cart.length === 0) {
-    reply = "Your cart is empty 🛒";
-  } else {
-    try {
-      const TAX_RATE = 0.05; // 5%
+  // confirm order
+  if (message === "confirm") {
+    if (state.cart.length === 0) {
+      reply = "Your cart is empty 🛒";
+    } else {
+      try {
+        const subtotalAmount = state.cart.reduce(
+          (sum, i) => sum + Number(i.subtotal),
+          0
+        );
 
-      // ✅ calculate amounts HERE
-      const subtotalAmount = state.cart.reduce(
-        (sum, item) => sum + item.subtotal,
-        0
-      );
+        const taxAmount = Number((subtotalAmount * TAX_RATE).toFixed(2));
+        const totalAmount = Number((subtotalAmount + taxAmount).toFixed(2));
 
-      const taxAmount = Number((subtotalAmount * TAX_RATE).toFixed(2));
-      const totalAmount = Number((subtotalAmount + taxAmount).toFixed(2));
+        await pool.query(
+          `INSERT INTO orders
+           (restaurant_id, phone, items, status,
+            subtotal_amount, tax_amount, total_amount)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            RESTAURANT_ID,
+            from,
+            JSON.stringify(state.cart),
+            "NEW",
+            subtotalAmount,
+            taxAmount,
+            totalAmount
+          ]
+        );
 
-      await pool.query(
-        `INSERT INTO orders
-         (restaurant_id, phone, items, status,
-          subtotal_amount, tax_amount, total_amount)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          RESTAURANT_ID,
-          from,
-          JSON.stringify(state.cart),
-          "NEW",
-          subtotalAmount,
-          taxAmount,
-          totalAmount
-        ]
-      );
-
-      reply =
+        reply =
 `Order confirmed 🎉
 Subtotal: ₹${subtotalAmount}
 Tax: ₹${taxAmount}
 Total: ₹${totalAmount}`;
 
-      delete userState[from];
-    } catch (err) {
-      console.error(err);
-      reply = "Something went wrong. Please try again.";
+        delete userState[from];
+      } catch (err) {
+        console.error(err);
+        reply = "Something went wrong. Please try again.";
+      }
     }
+
+    return res.send(`
+      <Response><Message>${reply}</Message></Response>
+    `);
   }
 
-  return res.send(`
-    <Response>
-      <Message>${reply}</Message>
-    </Response>
-  `);
-}
-
-
   /* =======================
-     START FLOW
+     START
      ======================= */
   if (state.step === "START") {
     if (message === "hi" || message === "hello") {
       if (!state.menuShown) {
-        const { rows: menuRows } = await pool.query(
-          `SELECT item_no, item_name
+        const { rows } = await pool.query(
+          `SELECT item_no, item_name, price
            FROM menu
            WHERE restaurant_id = $1 AND is_active = true
            ORDER BY item_no`,
           [RESTAURANT_ID]
         );
 
-        reply = buildMenuText(menuRows);
+        reply = buildMenuText(rows);
         state.menuShown = true;
         state.step = "MENU";
       } else {
@@ -212,7 +198,7 @@ Total: ₹${totalAmount}`;
   }
 
   /* =======================
-     MENU / ORDER INPUT
+     MENU INPUT
      ======================= */
   else if (state.step === "MENU") {
     const parsed = parseItemQty(message);
@@ -222,11 +208,11 @@ Total: ₹${totalAmount}`;
     } else {
       const { itemNo, qty } = parsed;
 
-      if (qty <= 0) {
-        reply = "Quantity must be at least 1 ❌";
+      if (!Number.isInteger(qty) || qty <= 0) {
+        reply = "Quantity must be valid ❌";
       } else {
         const { rows } = await pool.query(
-          `SELECT item_name
+          `SELECT item_name, price
            FROM menu
            WHERE restaurant_id = $1
              AND item_no = $2
@@ -237,15 +223,20 @@ Total: ₹${totalAmount}`;
         if (rows.length === 0) {
           reply = "Invalid item number ❌";
         } else {
+          const unitPrice = Number(rows[0].price);
+          const itemSubtotal = Number((unitPrice * qty).toFixed(2));
+
           state.cart.push({
             item_no: itemNo,
             item_name: rows[0].item_name,
-            qty
+            unit_price: unitPrice,
+            qty: qty,
+            subtotal: itemSubtotal
           });
 
           reply =
 `Added to cart ✅
-${rows[0].item_name} × ${qty}
+${rows[0].item_name} × ${qty} = ₹${itemSubtotal}
 
 Add more using *itemNo-qty*
 or type *cart* / *confirm*`;
@@ -255,14 +246,12 @@ or type *cart* / *confirm*`;
   }
 
   return res.send(`
-    <Response>
-      <Message>${reply}</Message>
-    </Response>
+    <Response><Message>${reply}</Message></Response>
   `);
 });
 
 /* =======================
-   SESSION AUTO-CLEANUP
+   SESSION CLEANUP
    ======================= */
 setInterval(() => {
   const now = Date.now();
