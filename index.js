@@ -144,7 +144,7 @@ app.post("/whatsapp", async (req, res) => {
 
         await pool.query(
           `INSERT INTO orders
-           (restaurant_id, phone, items, status, order_total_items
+           (restaurant_id, phone, items, status, order_total_items,
             subtotal_amount, tax_amount, total_amount)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [
