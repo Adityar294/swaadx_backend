@@ -5,16 +5,6 @@ const { Pool } = require("pg");
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Financials
-const TAX_RATE = 0.05; // 5% example
-
-const subtotalAmount = state.cart.reduce(
-  (sum, item) => sum + item.subtotal,
-  0
-);
-
-const taxAmount = Number((subtotalAmount * TAX_RATE).toFixed(2));
-const totalAmount = Number((subtotalAmount + taxAmount).toFixed(2));
 
 /* =======================
    DATABASE CONFIG
@@ -143,44 +133,58 @@ app.post("/whatsapp", async (req, res) => {
   }
 
   // CONFIRM ORDER
-  if (message === "confirm") {
-    if (state.cart.length === 0) {
-      reply = "Your cart is empty 🛒";
-    } else {
-      try {
-await pool.query(
-  `INSERT INTO orders 
-   (restaurant_id, phone, items, status,
-    subtotal_amount, tax_amount, total_amount)
-   VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-  [
-    RESTAURANT_ID,
-    from,
-    JSON.stringify(state.cart),
-    "NEW",
-    subtotalAmount,
-    taxAmount,
-    totalAmount
-  ]
-);
+if (message === "confirm") {
+  if (state.cart.length === 0) {
+    reply = "Your cart is empty 🛒";
+  } else {
+    try {
+      const TAX_RATE = 0.05; // 5%
 
-        reply =
+      // ✅ calculate amounts HERE
+      const subtotalAmount = state.cart.reduce(
+        (sum, item) => sum + item.subtotal,
+        0
+      );
+
+      const taxAmount = Number((subtotalAmount * TAX_RATE).toFixed(2));
+      const totalAmount = Number((subtotalAmount + taxAmount).toFixed(2));
+
+      await pool.query(
+        `INSERT INTO orders
+         (restaurant_id, phone, items, status,
+          subtotal_amount, tax_amount, total_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          RESTAURANT_ID,
+          from,
+          JSON.stringify(state.cart),
+          "NEW",
+          subtotalAmount,
+          taxAmount,
+          totalAmount
+        ]
+      );
+
+      reply =
 `Order confirmed 🎉
-Thank you for ordering!`;
+Subtotal: ₹${subtotalAmount}
+Tax: ₹${taxAmount}
+Total: ₹${totalAmount}`;
 
-        delete userState[from];
-      } catch (err) {
-        console.error(err);
-        reply = "Something went wrong. Please try again.";
-      }
+      delete userState[from];
+    } catch (err) {
+      console.error(err);
+      reply = "Something went wrong. Please try again.";
     }
-
-    return res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
-    `);
   }
+
+  return res.send(`
+    <Response>
+      <Message>${reply}</Message>
+    </Response>
+  `);
+}
+
 
   /* =======================
      START FLOW
