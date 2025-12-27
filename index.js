@@ -14,29 +14,39 @@ const pool = new Pool({
 });
 
 /* =======================
-   IN-MEMORY USER STATE
+   CONSTANTS
+   ======================= */
+const RESTAURANT_ID = 1; // single restaurant for MVP
+const SESSION_EXPIRY_MS = 30 * 60 * 1000; // 30 mins
+
+/* =======================
+   IN-MEMORY SESSION STATE
    ======================= */
 const userState = {};
 
 /* =======================
-   MENU CONFIG
+   HELPERS
    ======================= */
-const MENU = {
-  1: "Margherita Pizza",
-  2: "Veg Burger"
-};
 
-/* =======================
-   HELPER: PARSE 1-3 FORMAT
-   ======================= */
+// Parse "1-3" → { itemNo: 1, qty: 3 }
 function parseItemQty(input) {
   const match = input.match(/^(\d+)\s*-\s*(\d+)$/);
   if (!match) return null;
 
   return {
-    itemNo: parseInt(match[1]),
-    qty: parseInt(match[2])
+    itemNo: parseInt(match[1], 10),
+    qty: parseInt(match[2], 10)
   };
+}
+
+// Build menu text from DB rows
+function buildMenuText(menuRows) {
+  let text = "Menu 🍽️\n";
+  menuRows.forEach(row => {
+    text += `${row.item_no}️⃣ ${row.item_name}\n`;
+  });
+  text += "\nOrder using *itemNo-qty*\nExample: *1-2*";
+  return text;
 }
 
 /* =======================
@@ -55,7 +65,7 @@ app.post("/whatsapp", async (req, res) => {
 
   let reply = "";
 
-  /* -------- INIT USER -------- */
+  /* -------- INIT SESSION -------- */
   if (!userState[from]) {
     userState[from] = {
       step: "START",
@@ -66,18 +76,73 @@ app.post("/whatsapp", async (req, res) => {
   }
 
   const state = userState[from];
-  state.lastActive = Date.now(); // refresh activity timestamp
+  state.lastActive = Date.now();
 
-  /* -------- GLOBAL: CONFIRM -------- */
+  /* =======================
+     GLOBAL COMMANDS
+     ======================= */
+
+  // RESTART / CANCEL
+  if (message === "restart" || message === "cancel") {
+    delete userState[from];
+    reply = "Session cleared ✅\nType *hi* to start again";
+
+    return res.send(`
+      <Response>
+        <Message>${reply}</Message>
+      </Response>
+    `);
+  }
+
+  // CART
+  if (message === "cart") {
+    if (state.cart.length === 0) {
+      reply = "Your cart is empty 🛒";
+    } else {
+      reply = "Your cart 🛒:\n";
+      state.cart.forEach((i, idx) => {
+        reply += `${idx + 1}. ${i.item_name} × ${i.qty}\n`;
+      });
+      reply += "\nType *confirm* to place order";
+    }
+
+    return res.send(`
+      <Response>
+        <Message>${reply}</Message>
+      </Response>
+    `);
+  }
+
+  // REMOVE ITEM (remove 1)
+  if (message.startsWith("remove ")) {
+    const idx = parseInt(message.split(" ")[1], 10) - 1;
+
+    if (isNaN(idx) || idx < 0 || idx >= state.cart.length) {
+      reply = "Invalid item number to remove ❌";
+    } else {
+      const removed = state.cart.splice(idx, 1);
+      reply = `Removed ${removed[0].item_name} ❌`;
+    }
+
+    return res.send(`
+      <Response>
+        <Message>${reply}</Message>
+      </Response>
+    `);
+  }
+
+  // CONFIRM ORDER
   if (message === "confirm") {
     if (state.cart.length === 0) {
       reply = "Your cart is empty 🛒";
     } else {
       try {
         await pool.query(
-          `INSERT INTO orders (phone, items, status, order_total_items)
-           VALUES ($1, $2, $3, $4)`,
+          `INSERT INTO orders 
+           (restaurant_id, phone, items, status, order_total_items)
+           VALUES ($1, $2, $3, $4, $5)`,
           [
+            RESTAURANT_ID,
             from,
             JSON.stringify(state.cart),
             "NEW",
@@ -85,7 +150,10 @@ app.post("/whatsapp", async (req, res) => {
           ]
         );
 
-        reply = "Order confirmed 🎉 Thank you!";
+        reply =
+`Order confirmed 🎉
+Thank you for ordering!`;
+
         delete userState[from];
       } catch (err) {
         console.error(err);
@@ -100,73 +168,70 @@ app.post("/whatsapp", async (req, res) => {
     `);
   }
 
-  /* -------- GLOBAL: CART -------- */
-  if (message === "cart") {
-    if (state.cart.length === 0) {
-      reply = "Your cart is empty 🛒";
-    } else {
-      reply = "Your cart 🛒:\n";
-      state.cart.forEach((i, idx) => {
-        reply += `${idx + 1}. ${i.item} × ${i.qty}\n`;
-      });
-      reply += "\nType *confirm* to place order";
-    }
-
-    return res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
-    `);
-  }
-
-  /* -------- START / MENU DISPLAY -------- */
+  /* =======================
+     START FLOW
+     ======================= */
   if (state.step === "START") {
     if (message === "hi" || message === "hello") {
       if (!state.menuShown) {
-        reply =
-`Welcome to SwaadX 🍽️
-Menu:
-1️⃣ Margherita Pizza
-2️⃣ Veg Burger
+        const { rows: menuRows } = await pool.query(
+          `SELECT item_no, item_name
+           FROM menu
+           WHERE restaurant_id = $1 AND is_active = true
+           ORDER BY item_no`,
+          [RESTAURANT_ID]
+        );
 
-Order using:
-*1-3* (item-quantity)`;
-
+        reply = buildMenuText(menuRows);
         state.menuShown = true;
         state.step = "MENU";
       } else {
-        reply = "Use format *1-3*, or type *cart* / *confirm*";
+        reply = "Use *itemNo-qty* or type *cart* / *confirm*";
       }
     } else {
       reply = "Type *hi* to start ordering";
     }
   }
 
-  /* -------- MENU / ORDER INPUT -------- */
+  /* =======================
+     MENU / ORDER INPUT
+     ======================= */
   else if (state.step === "MENU") {
     const parsed = parseItemQty(message);
 
     if (!parsed) {
-      reply = "Use format *1-3* (item-quantity)";
+      reply = "Use format *itemNo-qty* (example: *2-1*)";
     } else {
-      const itemName = MENU[parsed.itemNo];
+      const { itemNo, qty } = parsed;
 
-      if (!itemName) {
-        reply = "Invalid item number ❌";
-      } else if (parsed.qty <= 0) {
+      if (qty <= 0) {
         reply = "Quantity must be at least 1 ❌";
       } else {
-        state.cart.push({
-          item: itemName,
-          qty: parsed.qty
-        });
+        const { rows } = await pool.query(
+          `SELECT item_name
+           FROM menu
+           WHERE restaurant_id = $1
+             AND item_no = $2
+             AND is_active = true`,
+          [RESTAURANT_ID, itemNo]
+        );
 
-        reply =
+        if (rows.length === 0) {
+          reply = "Invalid item number ❌";
+        } else {
+          state.cart.push({
+            item_no: itemNo,
+            item_name: rows[0].item_name,
+            qty
+          });
+
+          reply =
 `Added to cart ✅
-${itemName} × ${parsed.qty}
+${rows[0].item_name} × ${qty}
 
-Add more items using *1-2*
+Add more using *itemNo-qty*
 or type *cart* / *confirm*`;
+        }
       }
     }
   }
@@ -179,14 +244,12 @@ or type *cart* / *confirm*`;
 });
 
 /* =======================
-   AUTO-CLEAN INACTIVE SESSIONS
+   SESSION AUTO-CLEANUP
    ======================= */
 setInterval(() => {
   const now = Date.now();
-  const EXPIRY_TIME = 30 * 60 * 1000; // 30 minutes
-
   for (const user in userState) {
-    if (now - userState[user].lastActive > EXPIRY_TIME) {
+    if (now - userState[user].lastActive > SESSION_EXPIRY_MS) {
       delete userState[user];
     }
   }
