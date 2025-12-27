@@ -59,11 +59,14 @@ app.post("/whatsapp", async (req, res) => {
   if (!userState[from]) {
     userState[from] = {
       step: "START",
-      cart: []
+      cart: [],
+      menuShown: false,
+      lastActive: Date.now()
     };
   }
 
   const state = userState[from];
+  state.lastActive = Date.now(); // refresh activity timestamp
 
   /* -------- GLOBAL: CONFIRM -------- */
   if (message === "confirm") {
@@ -116,19 +119,24 @@ app.post("/whatsapp", async (req, res) => {
     `);
   }
 
-  /* -------- START -------- */
+  /* -------- START / MENU DISPLAY -------- */
   if (state.step === "START") {
     if (message === "hi" || message === "hello") {
-      reply =
+      if (!state.menuShown) {
+        reply =
 `Welcome to SwaadX 🍽️
 Menu:
 1️⃣ Margherita Pizza
 2️⃣ Veg Burger
 
-Order using format:
-*1-3*  (item-quantity)`;
+Order using:
+*1-3* (item-quantity)`;
 
-      state.step = "MENU";
+        state.menuShown = true;
+        state.step = "MENU";
+      } else {
+        reply = "Use format *1-3*, or type *cart* / *confirm*";
+      }
     } else {
       reply = "Type *hi* to start ordering";
     }
@@ -169,6 +177,20 @@ or type *cart* / *confirm*`;
     </Response>
   `);
 });
+
+/* =======================
+   AUTO-CLEAN INACTIVE SESSIONS
+   ======================= */
+setInterval(() => {
+  const now = Date.now();
+  const EXPIRY_TIME = 30 * 60 * 1000; // 30 minutes
+
+  for (const user in userState) {
+    if (now - userState[user].lastActive > EXPIRY_TIME) {
+      delete userState[user];
+    }
+  }
+}, 5 * 60 * 1000);
 
 /* =======================
    START SERVER
