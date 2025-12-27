@@ -5,6 +5,17 @@ const { Pool } = require("pg");
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
+// Financials
+const TAX_RATE = 0.05; // 5% example
+
+const subtotalAmount = state.cart.reduce(
+  (sum, item) => sum + item.subtotal,
+  0
+);
+
+const taxAmount = Number((subtotalAmount * TAX_RATE).toFixed(2));
+const totalAmount = Number((subtotalAmount + taxAmount).toFixed(2));
+
 /* =======================
    DATABASE CONFIG
    ======================= */
@@ -137,18 +148,21 @@ app.post("/whatsapp", async (req, res) => {
       reply = "Your cart is empty 🛒";
     } else {
       try {
-        await pool.query(
-          `INSERT INTO orders 
-           (restaurant_id, phone, items, status, order_total_items)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [
-            RESTAURANT_ID,
-            from,
-            JSON.stringify(state.cart),
-            "NEW",
-            state.cart.reduce((sum, i) => sum + i.qty, 0)
-          ]
-        );
+await pool.query(
+  `INSERT INTO orders 
+   (restaurant_id, phone, items, status,
+    subtotal_amount, tax_amount, total_amount)
+   VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+  [
+    RESTAURANT_ID,
+    from,
+    JSON.stringify(state.cart),
+    "NEW",
+    subtotalAmount,
+    taxAmount,
+    totalAmount
+  ]
+);
 
         reply =
 `Order confirmed 🎉
