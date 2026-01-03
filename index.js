@@ -17,7 +17,6 @@ const pool = new Pool({
 /* =======================
    CONSTANTS
    ======================= */
-const RESTAURANT_ID = 1;
 const TAX_RATE = 0.05;
 const SESSION_EXPIRY_MS = 30 * 60 * 1000;
 
@@ -49,68 +48,19 @@ function buildMenuText(rows) {
   return msg;
 }
 
+async function getRestaurantByWhatsapp(from) {
+  const { rows } = await pool.query(
+    `SELECT id FROM restaurants WHERE whatsapp_number = $1`,
+    [from]
+  );
+  return rows[0]?.id;
+}
+
 /* =======================
    HEALTH
    ======================= */
 app.get("/", (req, res) => {
   res.send("SwaadX backend running");
-});
-
-/* =======================
-   RESTAURANT APIs
-   ======================= */
-
-app.get("/orders", async (req, res) => {
-  const status = (req.query.status || "NEW").toUpperCase();
-
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, phone, items, order_status,
-              delivery_type, address_text,
-              subtotal_amount, tax_amount, total_amount,
-              created_at
-       FROM orders
-       WHERE order_status = $1
-       ORDER BY created_at ASC`,
-      [status]
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch orders" });
-  }
-});
-
-app.patch("/orders/:id/status", async (req, res) => {
-  const orderId = req.params.id;
-  const newStatus = (req.body.status || "").toUpperCase();
-
-  const allowed = [
-    "NEW",
-    "ACCEPTED",
-    "PREPARING",
-    "READY",
-    "COMPLETED",
-    "CANCELLED"
-  ];
-
-  if (!allowed.includes(newStatus)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-
-  try {
-    await pool.query(
-      `UPDATE orders
-       SET order_status = $1
-       WHERE id = $2`,
-      [newStatus, orderId]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to update order" });
-  }
 });
 
 /* =======================
@@ -121,6 +71,16 @@ app.post("/whatsapp", async (req, res) => {
   const messageRaw = (req.body.Body || "").trim();
   const message = messageRaw.toLowerCase();
   let reply = "";
+
+  const RESTAURANT_ID = await getRestaurantByWhatsapp(from);
+
+  if (!RESTAURANT_ID) {
+    return res.send(`
+      <Response>
+        <Message>This number is not linked to any restaurant.</Message>
+      </Response>
+    `);
+  }
 
   if (!userState[from]) {
     userState[from] = {
@@ -237,16 +197,15 @@ How would you like to receive your order?
 
       await pool.query(
         `INSERT INTO orders
-         (restaurant_id, phone, items, status, order_status,
+         (restaurant_id, phone, items, order_status,
           delivery_type, address_text,
           order_total_items,
           subtotal_amount, tax_amount, total_amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [
           RESTAURANT_ID,
           from,
           JSON.stringify(state.cart),
-          "NEW",
           "NEW",
           state.deliveryType,
           state.addressText,
