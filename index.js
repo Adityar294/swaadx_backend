@@ -55,6 +55,7 @@ async function getRestaurantByWhatsapp(from) {
   );
   return rows[0]?.id;
 }
+//final
 
 /* =======================
    HEALTH
