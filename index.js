@@ -50,7 +50,7 @@ function buildMenuText(rows) {
 
 async function getRestaurantByWhatsapp(to) {
   const { rows } = await pool.query(
-    `SELECT id FROM restaurants WHERE phone = $1`,
+    `SELECT id FROM restaurants WHERE whatsapp_phone = $1`,
     [to]
   );
   return rows[0]?.id;
