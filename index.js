@@ -48,10 +48,10 @@ function buildMenuText(rows) {
   return msg;
 }
 
-async function getRestaurantByWhatsapp(from) {
+async function getRestaurantByWhatsapp(to) {
   const { rows } = await pool.query(
     `SELECT id FROM restaurants WHERE phone = $1`,
-    [from]
+    [to]
   );
   return rows[0]?.id;
 }
@@ -73,7 +73,8 @@ app.post("/whatsapp", async (req, res) => {
   const message = messageRaw.toLowerCase();
   let reply = "";
 
-  const RESTAURANT_ID = await getRestaurantByWhatsapp(from);
+  const to = req.body.To;
+  const RESTAURANT_ID = await getRestaurantByWhatsapp(to);
 
   if (!RESTAURANT_ID) {
     return res.send(`
