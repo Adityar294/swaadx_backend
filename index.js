@@ -1,6 +1,7 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const { Pool } = require("pg");
+const restaurantAuth = require("./restaurantAuth");
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -287,6 +288,35 @@ Add more or type *cart* / *confirm*`;
   }
 
   res.send(`<Response><Message>${reply}</Message></Response>`);
+});
+
+app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
+  const restaurantId = req.restaurant.id;
+
+  const { rows } = await pool.query(
+    `SELECT *
+     FROM orders
+     WHERE restaurant_id = $1
+     ORDER BY created_at DESC`,
+    [restaurantId]
+  );
+
+  res.json(rows);
+});
+
+app.post("/dashboard/orders/:id/status", restaurantAuth, async (req, res) => {
+  const restaurantId = req.restaurant.id;
+  const orderId = req.params.id;
+  const { status } = req.body;
+
+  await pool.query(
+    `UPDATE orders
+     SET order_status = $1
+     WHERE id = $2 AND restaurant_id = $3`,
+    [status, orderId, restaurantId]
+  );
+
+  res.json({ success: true });
 });
 
 /* =======================
