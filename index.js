@@ -291,21 +291,27 @@ Add more or type *cart* / *confirm*`;
 });
 
 app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
-  const restaurantId = req.restaurant.id;
+  try {
+    const restaurantId = req.restaurant.id;
 
-  const { rows } = await pool.query(
-    `SELECT *
-     FROM orders
-     WHERE restaurant_id = $1
-     ORDER BY created_at DESC`,
-    [restaurantId]
-  );
+    const { rows } = await pool.query(
+      `SELECT *
+       FROM orders
+       WHERE restaurant_id = $1
+       ORDER BY created_at DESC`,
+      [restaurantId]
+    );
 
-  res.json(rows);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch orders" });
+  }
 });
 
+
 app.post("/dashboard/orders/:id/status", restaurantAuth, async (req, res) => {
-  const restaurantId = req.restaurant.id;
+  try{const restaurantId = req.restaurant.id;
   const orderId = req.params.id;
   const { status } = req.body;
 
@@ -317,6 +323,24 @@ app.post("/dashboard/orders/:id/status", restaurantAuth, async (req, res) => {
   );
 
   res.json({ success: true });
+}
+catch{
+      console.error(err);
+    res.status(500).json({ error: "Failed to update order status" });
+  
+}
+});
+app.get("/dashboard/me", restaurantAuth, async (req, res) => {
+  const restaurantId = req.restaurant.id;
+
+  const { rows } = await pool.query(
+    `SELECT id, name, plan, is_cloud_kitchen
+     FROM restaurants
+     WHERE id = $1`,
+    [restaurantId]
+  );
+
+  res.json(rows[0]);
 });
 
 /* =======================
