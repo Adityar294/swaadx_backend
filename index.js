@@ -311,10 +311,19 @@ app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
 
 
 app.post("/dashboard/orders/:id/status", restaurantAuth, async (req, res) => {
-  try{const restaurantId = req.restaurant.id;
-  const orderId = req.params.id;
-  const { status } = req.body;
+  try{
+    console.log("---- UPDATE ORDER STATUS ----");
+    console.log("Order ID:", req.params.id);
+    console.log("Status:", req.body.status);
+    console.log("Restaurant:", req.restaurant);
 
+    const restaurantId = req.restaurant.id;
+    const orderId = req.params.id;
+    const { status } = req.body;
+
+    if (!orderId || !status) {
+      return res.status(400).json({ error: "Missing orderId or status" });
+    }
   await pool.query(
     `UPDATE orders
      SET order_status = $1
