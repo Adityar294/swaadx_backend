@@ -293,13 +293,15 @@ Add more or type *cart* / *confirm*`;
 app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
   try {
     const restaurantId = req.restaurant.id;
+    const orderStatus = (req.query.status || "").toUpperCase();
 
     const { rows } = await pool.query(
       `SELECT *
        FROM orders
        WHERE restaurant_id = $1
+       AND order_status= $2
        ORDER BY created_at DESC`,
-      [restaurantId]
+      [restaurantId, orderStatus]
     );
 
     res.json(rows);
