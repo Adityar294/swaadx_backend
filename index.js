@@ -310,43 +310,41 @@ app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
 });
 
 
-app.post("/dashboard/orders/:id/status", restaurantAuth, async (req, res) => {
-  try {
-    const restaurantId = req.restaurant?.id;
-    const orderId = Number(req.params.id);
-    const status = req.body?.status;
+app.post(
+  "/dashboard/orders/:id/status/:status",
+  restaurantAuth,
+  async (req, res) => {
+    try {
+      const restaurantId = req.restaurant.id;
+      const orderId = Number(req.params.id);
+      const status = req.params.status;
 
-    console.log("Order ID:", orderId);
-    console.log("Status:", status);
-    console.log("Restaurant ID:", restaurantId);
+      console.log("Order ID:", orderId);
+      console.log("Status:", status);
+      console.log("Restaurant ID:", restaurantId);
 
-    if (!restaurantId || !orderId || !status) {
-      return res.status(400).json({
-        error: "Invalid input",
-        restaurantId,
-        orderId,
-        status
-      });
+      if (!orderId || !status || !restaurantId) {
+        return res.status(400).json({ error: "Invalid input" });
+      }
+
+      const result = await pool.query(
+        `UPDATE orders
+         SET order_status = $1
+         WHERE id = $2 AND restaurant_id = $3`,
+        [status, orderId, restaurantId]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("UPDATE ERROR:", error);
+      res.status(500).json({ error: "Internal Server Error" });
     }
-
-    const result = await pool.query(
-      `UPDATE orders
-       SET order_status = $1
-       WHERE id = $2 AND restaurant_id = $3
-       RETURNING id`,
-      [status, orderId, restaurantId]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error("UPDATE ERROR:", error);
-    res.status(500).json({ error: "Internal Server Error" });
   }
-});
+);
 
 app.get("/dashboard/me", restaurantAuth, async (req, res) => {
   const restaurantId = req.restaurant.id;
