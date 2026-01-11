@@ -293,14 +293,18 @@ Add more or type *cart* / *confirm*`;
 app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
   try {
     const restaurantId = req.restaurant.id;
-    const orderStatus = (req.query.status || "").toUpperCase();
+    const statusRaw = (req.query.status || "").toUpperCase();
+    if(!statusRaw){
+      return res.status(400).json({error: "status query param required"});
+    }
+    const orderStatus = statusRaw.trim().toUpperCase();
 
     const { rows } = await pool.query(
       `SELECT *
        FROM orders
        WHERE restaurant_id = $1
        AND order_status= $2
-       ORDER BY created_at DESC`,
+       ORDER BY created_at ASC`,
       [restaurantId, orderStatus]
     );
 
@@ -308,6 +312,7 @@ app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch orders" });
+    
   }
 });
 
