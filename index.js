@@ -49,14 +49,10 @@ function buildMenuText(rows) {
   return msg;
 }
 
-async function getRestaurantByWhatsapp(to) {
-  const { rows } = await pool.query(
-    `SELECT id FROM restaurants WHERE whatsapp_phone = $1`,
-    [to]
-  );
-  return rows[0]?.id;
+function extractRestaurantIdFromMessage(text) {
+  const match = text.match(/^order_restro_(\d+)$/i);
+  return match ? Number(match[1]) : null;
 }
-//final
 
 /* =======================
    HEALTH
@@ -74,17 +70,7 @@ app.post("/whatsapp", async (req, res) => {
   const message = messageRaw.toLowerCase();
   let reply = "";
 
-  const to = req.body.To;
-  const RESTAURANT_ID = await getRestaurantByWhatsapp(to);
-
-  if (!RESTAURANT_ID) {
-    return res.send(`
-      <Response>
-        <Message>This number is not linked to any restaurant.</Message>
-      </Response>
-    `);
-  }
-
+  // Init session
   if (!userState[from]) {
     userState[from] = {
       step: "START",
@@ -94,6 +80,7 @@ app.post("/whatsapp", async (req, res) => {
       awaitingAddress: false,
       deliveryType: null,
       addressText: null,
+      restaurantId: null,
       lastActive: Date.now()
     };
   }
@@ -101,12 +88,58 @@ app.post("/whatsapp", async (req, res) => {
   const state = userState[from];
   state.lastActive = Date.now();
 
+  /* ===== IDENTIFIER HANDLING ===== */
+  if (!state.restaurantId) {
+    const extractedId = extractRestaurantIdFromMessage(message);
+
+    if (!extractedId) {
+      return res.send(`
+        <Response>
+          <Message>
+Please scan the restaurant QR code to start ordering 📲
+          </Message>
+        </Response>
+      `);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id FROM restaurants WHERE id = $1`,
+      [extractedId]
+    );
+
+    if (!rows.length) {
+      return res.send(`
+        <Response>
+          <Message>
+Invalid restaurant code ❌
+Please scan the correct QR code.
+          </Message>
+        </Response>
+      `);
+    }
+
+    state.restaurantId = extractedId;
+
+    return res.send(`
+      <Response>
+        <Message>
+Welcome! 👋
+Type *hi* to view the menu 🍽️
+        </Message>
+      </Response>
+    `);
+  }
+
+  const RESTAURANT_ID = state.restaurantId;
+
   /* ===== GLOBAL COMMANDS ===== */
 
   if (message === "restart" || message === "cancel") {
     delete userState[from];
-    return res.send(`<Response><Message>Session cleared ✅
-Type *hi* to start again</Message></Response>`);
+    return res.send(`<Response><Message>
+Session cleared ✅
+Type *hi* to start again
+</Message></Response>`);
   }
 
   if (message === "cart") {
@@ -141,8 +174,7 @@ Type *hi* to start again</Message></Response>`);
     } else {
       state.addressText = messageRaw;
       state.awaitingAddress = false;
-      reply = `Address saved ✅
-Type *confirm* to place your order`;
+      reply = "Address saved ✅\nType *confirm* to place your order";
     }
     return res.send(`<Response><Message>${reply}</Message></Response>`);
   }
@@ -155,12 +187,7 @@ Type *confirm* to place your order`;
       state.awaitingDeliveryType = false;
       state.awaitingAddress = true;
 
-      reply = `Please type your full delivery address in ONE message.
-
-Example:
-Flat 12, Shanti Apartments,
-Near Metro Station,
-Andheri West, Mumbai - 400053`;
+      reply = `Please type your full delivery address in ONE message.`;
     } else if (message === "2") {
       state.deliveryType = "pickup";
       state.awaitingDeliveryType = false;
@@ -240,7 +267,7 @@ Total: ₹${total}`;
       const { rows } = await pool.query(
         `SELECT item_no, item_name, price
          FROM menu
-         WHERE restaurant_id=$1 AND is_active=true
+         WHERE restaurant_id = $1 AND is_active = true
          ORDER BY item_no`,
         [RESTAURANT_ID]
       );
@@ -261,7 +288,7 @@ Total: ₹${total}`;
       const { rows } = await pool.query(
         `SELECT item_name, price
          FROM menu
-         WHERE restaurant_id=$1 AND item_no=$2 AND is_active=true`,
+         WHERE restaurant_id = $1 AND item_no = $2 AND is_active = true`,
         [RESTAURANT_ID, itemNo]
       );
 
@@ -290,66 +317,56 @@ Add more or type *cart* / *confirm*`;
   res.send(`<Response><Message>${reply}</Message></Response>`);
 });
 
+/* =======================
+   DASHBOARD APIS
+   ======================= */
+
 app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
-  try {
-    const restaurantId = req.restaurant.id;
-    const statusRaw = (req.query.status || "").toUpperCase();
-    if(!statusRaw){
-      return res.status(400).json({error: "status query param required"});
-    }
-    const orderStatus = statusRaw.trim().toUpperCase();
+  const restaurantId = req.restaurant.id;
+  const statusRaw = req.query.status;
 
-    const { rows } = await pool.query(
-      `SELECT *
-       FROM orders
-       WHERE restaurant_id = $1
-       AND order_status= $2
-       ORDER BY created_at ASC`,
-      [restaurantId, orderStatus]
-    );
-
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch orders" });
-    
+  if (!statusRaw) {
+    return res.status(400).json({ error: "status query param required" });
   }
-});
 
+  const orderStatus = statusRaw.trim().toUpperCase();
+
+  const { rows } = await pool.query(
+    `SELECT *
+     FROM orders
+     WHERE restaurant_id = $1
+       AND order_status = $2
+     ORDER BY created_at ASC`,
+    [restaurantId, orderStatus]
+  );
+
+  res.json(rows);
+});
 
 app.post(
   "/dashboard/orders/:id/status/:status",
   restaurantAuth,
   async (req, res) => {
-    try {
-      const restaurantId = req.restaurant.id;
-      const orderId = Number(req.params.id);
-      const status = req.params.status;
+    const restaurantId = req.restaurant.id;
+    const orderId = Number(req.params.id);
+    const status = req.params.status;
 
-      console.log("Order ID:", orderId);
-      console.log("Status:", status);
-      console.log("Restaurant ID:", restaurantId);
-
-      if (!orderId || !status || !restaurantId) {
-        return res.status(400).json({ error: "Invalid input" });
-      }
-
-      const result = await pool.query(
-        `UPDATE orders
-         SET order_status = $1
-         WHERE id = $2 AND restaurant_id = $3`,
-        [status, orderId, restaurantId]
-      );
-
-      if (result.rowCount === 0) {
-        return res.status(404).json({ error: "Order not found" });
-      }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("UPDATE ERROR:", error);
-      res.status(500).json({ error: "Internal Server Error" });
+    if (!orderId || !status) {
+      return res.status(400).json({ error: "Invalid input" });
     }
+
+    const result = await pool.query(
+      `UPDATE orders
+       SET order_status = $1
+       WHERE id = $2 AND restaurant_id = $3`,
+      [status, orderId, restaurantId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    res.json({ success: true });
   }
 );
 
@@ -385,4 +402,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
-// Final
