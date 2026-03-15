@@ -473,7 +473,75 @@ cancel ${orderId}`;
   res.send(`<Response><Message>${reply}</Message></Response>`);
 
 });
+/* =======================
+DASHBOARD APIs
+======================= */
 
+app.get("/dashboard/me", restaurantAuth, async (req, res) => {
+
+  const restaurantId = req.restaurant.id;
+
+  const { rows } = await pool.query(
+    `SELECT id, name, plan, is_cloud_kitchen
+     FROM restaurants
+     WHERE id = $1`,
+    [restaurantId]
+  );
+
+  res.json(rows[0]);
+
+});
+
+
+app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
+
+  const restaurantId = req.restaurant.id;
+  const statusRaw = req.query.status;
+
+  if (!statusRaw) {
+    return res.status(400).json({ error: "status query param required" });
+  }
+
+  const orderStatus = statusRaw.trim().toUpperCase();
+
+  const { rows } = await pool.query(
+    `SELECT *
+     FROM orders
+     WHERE restaurant_id = $1
+     AND order_status = $2
+     ORDER BY created_at ASC`,
+    [restaurantId, orderStatus]
+  );
+
+  res.json(rows);
+
+});
+
+
+app.post(
+  "/dashboard/orders/:id/status/:status",
+  restaurantAuth,
+  async (req, res) => {
+
+    const restaurantId = req.restaurant.id;
+    const orderId = Number(req.params.id);
+    const status = req.params.status;
+
+    const result = await pool.query(
+      `UPDATE orders
+       SET order_status = $1
+       WHERE id = $2 AND restaurant_id = $3`,
+      [status, orderId, restaurantId]
+    );
+
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    res.json({ success: true });
+
+  }
+);
 /* =======================
 SESSION CLEANUP
 ======================= */
