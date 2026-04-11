@@ -104,7 +104,44 @@ app.post("/whatsapp", async (req, res) => {
   const message = messageRaw.toLowerCase();
 
   let reply = "";
+/* =======================
+CANCEL ORDER (GLOBAL)
+======================= */
 
+if (message.startsWith("cancel")) {
+
+  const parts = message.split(" ");
+  const orderId = Number(parts[1]);
+
+  if (!orderId) {
+    return res.send(`<Response><Message>Invalid cancel format. Use: cancel 123</Message></Response>`);
+  }
+
+  const { rows } = await pool.query(
+    `SELECT created_at FROM orders WHERE id=$1`,
+    [orderId]
+  );
+
+  if (!rows.length) {
+    return res.send(`<Response><Message>Order not found</Message></Response>`);
+  }
+
+  const created = new Date(rows[0].created_at);
+  const now = new Date();
+
+  const diff = (now - created) / 60000;
+
+  if (diff > 10) {
+    return res.send(`<Response><Message>Cancel window expired</Message></Response>`);
+  }
+
+  await pool.query(
+    `UPDATE orders SET order_status='CANCELLED' WHERE id=$1`,
+    [orderId]
+  );
+
+  return res.send(`<Response><Message>Order cancelled ✅</Message></Response>`);
+}
   if (!userState[from]) {
 
     userState[from] = {
