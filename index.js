@@ -417,7 +417,7 @@ Total: ₹${total}
 Order No: ${restaurantOrderNo}
 
 You can cancel within 10 minutes using:
-cancel ${orderId}`;
+cancel ${restaurantOrderNo}`;
 
     // 🔹 Clear session
     delete userState[from];
