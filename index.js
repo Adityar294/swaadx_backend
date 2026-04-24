@@ -343,11 +343,19 @@ Type *hi* to see the menu 🍽️</Message>
       const tax = Number((subtotal * TAX_RATE).toFixed(2));
       const total = Number((subtotal + tax).toFixed(2));
       const totalItems = state.cart.reduce((s, i) => s + i.qty, 0);
+      const orderNoRes = await pool.query(
+        `SELECT COALESCE(MAX(restaurant_order_no), 0) + 1 AS next_no
+        FROM orders
+        WHERE restaurant_id = $1`,
+      [RESTAURANT_ID]
+);
 
+      const restaurantOrderNo = orderNoRes.rows[0].next_no;
+      
       const result = await pool.query(
         `INSERT INTO orders
         (restaurant_id,phone,items,order_status,delivery_type,address_text,
-        order_total_items,subtotal_amount,tax_amount,total_amount)
+        order_total_items,subtotal_amount,tax_amount,total_amount,restaurant_order_no)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         RETURNING id`,
         [
@@ -360,7 +368,8 @@ Type *hi* to see the menu 🍽️</Message>
           totalItems,
           subtotal,
           tax,
-          total
+          total,
+          restaurantOrderNo
         ]
       );
 
@@ -447,21 +456,51 @@ cancel ${orderId}`;
   MENU FLOW
   ======================= */
 
-  if (message === "hi" || message === "menu") {
+ if (message === "hi" || message === "menu") {
 
-    const { rows } = await pool.query(
-      `SELECT item_no,item_name,price
-      FROM menu
-      WHERE restaurant_id=$1 AND is_active=true
-      ORDER BY item_no`,
-      [RESTAURANT_ID]
-    );
+  // 🔹 Get menu image URL
+  const menuRes = await pool.query(
+    `SELECT menu_image_url FROM restaurants WHERE id=$1`,
+    [RESTAURANT_ID]
+  );
 
-    reply = buildMenuText(rows);
+  const imageUrl = menuRes.rows[0]?.menu_image_url;
 
-    return res.send(`<Response><Message>${reply}</Message></Response>`);
+  // 🔹 If image exists → send image
+  if (imageUrl) {
+    return res.send(`
+      <Response>
+        <Message>
+          <Body>
+Menu 🍽️
 
+Order using:
+1-2
+3-1
+
+Example:
+1-2
+3-1
+          </Body>
+          <Media>${imageUrl}</Media>
+        </Message>
+      </Response>
+    `);
   }
+
+  // 🔹 Fallback (if image missing)
+  const { rows } = await pool.query(
+    `SELECT item_no, item_name, price
+     FROM menu
+     WHERE restaurant_id=$1 AND is_active=true
+     ORDER BY item_no`,
+    [RESTAURANT_ID]
+  );
+
+  reply = buildMenuText(rows);
+
+  return res.send(`<Response><Message>${reply}</Message></Response>`);
+}
 
   /* =======================
   ITEM ADDING
