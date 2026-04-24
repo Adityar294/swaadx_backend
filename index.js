@@ -98,7 +98,6 @@ WHATSAPP WEBHOOK
 ======================= */
 
 app.post("/whatsapp", async (req, res) => {
-console.log("Incoming:", message);
   const from = req.body.From;
   const messageRaw = (req.body.Body || "").trim();
   const message = messageRaw.toLowerCase();
@@ -410,7 +409,6 @@ Order using:
     return res.send(`<Response><Message>Added to cart ✅\nType cart or confirm</Message></Response>`);
   }
 
-  console.log("Reached end fallback");
   return res.send(`<Response><Message>Type *menu* to see menu</Message></Response>`);
 });
 // app.post("/whatsapp", async (req, res) => {
