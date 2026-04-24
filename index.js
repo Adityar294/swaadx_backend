@@ -104,59 +104,82 @@ app.post("/whatsapp", async (req, res) => {
   const message = messageRaw.toLowerCase();
 
   let reply = "";
+
 /* =======================
-CANCEL ORDER (GLOBAL)
+CANCEL / RESET LOGIC
 ======================= */
 
 if (message.startsWith("cancel")) {
 
   const parts = message.split(" ");
-  const orderId = Number(parts[1]);
 
-  if (!orderId) {
-    return res.send(`<Response><Message>Invalid cancel format. Use: cancel 123</Message></Response>`);
+  // 🔴 Case 1: cancel order → "cancel 12"
+  if (parts.length > 1) {
+
+    const orderId = Number(parts[1]);
+
+    if (!orderId) {
+      return res.send(`<Response><Message>Invalid format. Use: cancel 123</Message></Response>`);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT created_at FROM orders WHERE id=$1`,
+      [orderId]
+    );
+
+    if (!rows.length) {
+      return res.send(`<Response><Message>Order not found</Message></Response>`);
+    }
+
+    const created = new Date(rows[0].created_at);
+    const now = new Date();
+    const diff = (now - created) / 60000;
+
+    if (diff > 10) {
+      return res.send(`<Response><Message>Cancel window expired</Message></Response>`);
+    }
+
+    await pool.query(
+      `UPDATE orders SET order_status='CANCELLED' WHERE id=$1`,
+      [orderId]
+    );
+
+    return res.send(`<Response><Message>Order cancelled ✅</Message></Response>`);
   }
 
-  const { rows } = await pool.query(
-    `SELECT created_at FROM orders WHERE id=$1`,
-    [orderId]
-  );
+  // 🟢 Case 2: cancel (no id) → reset session
+  delete userState[from];
 
-  if (!rows.length) {
-    return res.send(`<Response><Message>Order not found</Message></Response>`);
-  }
+  return res.send(`
+    <Response>
+      <Message>
+Session cancelled ❌
 
-  const created = new Date(rows[0].created_at);
-  const now = new Date();
-
-  const diff = (now - created) / 60000;
-
-  if (diff > 10) {
-    return res.send(`<Response><Message>Cancel window expired</Message></Response>`);
-  }
-
-  await pool.query(
-    `UPDATE orders SET order_status='CANCELLED' WHERE id=$1`,
-    [orderId]
-  );
-
-  return res.send(`<Response><Message>Order cancelled ✅</Message></Response>`);
+Type ORDER_RESTRO_<id> to start again
+      </Message>
+    </Response>
+  `);
 }
-  if (!userState[from]) {
 
-    userState[from] = {
-      step: "START",
-      cart: [],
-      awaitingDeliveryType: false,
-      awaitingAddress: false,
-      deliveryType: null,
-      addressText: null,
-      restaurantId: null,
-      lastActive: Date.now()
-    };
 
-  }
+/* =======================
+RESTART / RESET COMMANDS
+======================= */
 
+if (message === "restart" || message === "reset") {
+
+  delete userState[from];
+
+  return res.send(`
+    <Response>
+      <Message>
+Session restarted 🔄
+
+Scan QR again to order
+      </Message>
+    </Response>
+  `);
+}
   const state = userState[from];
   state.lastActive = Date.now();
 
@@ -210,17 +233,17 @@ Type *hi* to see the menu 🍽️</Message>
   GLOBAL COMMANDS
   ======================= */
 
-  if (message === "restart" || message === "cancel session") {
+  // if (message === "restart" || message === "cancel session") {
 
-    delete userState[from];
+  //   delete userState[from];
 
-    return res.send(`
-      <Response>
-        <Message>Session cleared. Type *hi* to start again.</Message>
-      </Response>
-    `);
+  //   return res.send(`
+  //     <Response>
+  //       <Message>Session cleared. Type *hi* to start again.</Message>
+  //     </Response>
+  //   `);
 
-  }
+  // }
 
   if (message === "cart") {
 
@@ -481,6 +504,12 @@ Order using:
 Example:
 1-2
 3-1
+
+You can type anytime:
+
+• cancel → reset your order ❌  
+• restart → start fresh 🔄  
+• cancel <order_id> → cancel placed order
           </Body>
           <Media>${imageUrl}</Media>
         </Message>
