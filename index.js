@@ -236,20 +236,25 @@ if (message === "hi" || message === "menu") {
     console.log("Image URL:", imageUrl);
 
     if (imageUrl) {
-      return res.send(`
-        <Response>
-          <Message>
+ return res.send(`
+<Response>
+  <Message>
+    <Body>
 Menu 🍽️
 
 Order using:
 1-2
 3-1
-          </Message>
-          <Message>
-            <Media>${imageUrl}</Media>
-          </Message>
-        </Response>
-      `);
+
+You can type anytime:
+• cancel → reset ❌  
+• restart → fresh 🔄  
+• cancel &lt;order_id&gt; → cancel order
+    </Body>
+    <Media>${imageUrl}</Media>
+  </Message>
+</Response>
+`);
     }
 
     // fallback text menu
@@ -326,37 +331,56 @@ Order using:
   CONFIRM
   ======================= */
 
-  if (message === "confirm") {
+ if (message === "confirm") {
 
-    if (!state.cart.length) {
-      return res.send(`<Response><Message>Your cart is empty</Message></Response>`);
-    }
+  if (!state.cart.length) {
+    return res.send(`<Response><Message>Your cart is empty</Message></Response>`);
+  }
 
-    if (!state.deliveryType) {
-      state.awaitingDeliveryType = true;
-      return res.send(`<Response><Message>1 Delivery\n2 Pickup</Message></Response>`);
-    }
+  if (!state.deliveryType) {
+    state.awaitingDeliveryType = true;
+    return res.send(`
+      <Response>
+        <Message>
+1️⃣ Delivery
+2️⃣ Pickup
+        </Message>
+      </Response>
+    `);
+  }
+
+  if (state.deliveryType === "delivery" && !state.addressText) {
+    state.awaitingAddress = true;
+    return res.send(`<Response><Message>Please enter delivery address</Message></Response>`);
+  }
+
+  try {
 
     const subtotal = state.cart.reduce((s, i) => s + i.subtotal, 0);
-    const tax = subtotal * TAX_RATE;
-    const total = subtotal + tax;
+    const tax = Number((subtotal * TAX_RATE).toFixed(2));
+    const total = Number((subtotal + tax).toFixed(2));
+    const totalItems = state.cart.reduce((s, i) => s + i.qty, 0);
 
+    // 🔹 Get next restaurant order number
     const orderNoRes = await pool.query(
-      `SELECT COALESCE(MAX(restaurant_order_no),0)+1 AS next_no FROM orders WHERE restaurant_id=$1`,
+      `SELECT COALESCE(MAX(restaurant_order_no), 0) + 1 AS next_no
+       FROM orders
+       WHERE restaurant_id = $1`,
       [RESTAURANT_ID]
     );
 
     const restaurantOrderNo = orderNoRes.rows[0].next_no;
 
+    // 🔹 Insert order
     const result = await pool.query(
       `INSERT INTO orders
-      (restaurant_id, phone, items, order_status,
-       delivery_type, address_text,
-       order_total_items,
-       subtotal_amount, tax_amount, total_amount,
-       restaurant_order_no)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      RETURNING id`,
+       (restaurant_id, phone, items, order_status,
+        delivery_type, address_text,
+        order_total_items,
+        subtotal_amount, tax_amount, total_amount,
+        restaurant_order_no)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id`,
       [
         RESTAURANT_ID,
         from,
@@ -364,7 +388,7 @@ Order using:
         "NEW",
         state.deliveryType,
         state.addressText,
-        state.cart.length,
+        totalItems,
         subtotal,
         tax,
         total,
@@ -372,11 +396,45 @@ Order using:
       ]
     );
 
+    const orderId = result.rows[0].id;
+
+    // 🔹 Build cart summary
+    let summary = "Order Summary 🧾\n";
+
+    state.cart.forEach((item, i) => {
+      summary += `${i + 1}. ${item.item_name} × ${item.qty} = ₹${item.subtotal}\n`;
+    });
+
+    // 🔹 Final message
+    const reply = `Order confirmed 🎉
+
+${summary}
+
+Subtotal: ₹${subtotal}
+Tax: ₹${tax}
+Total: ₹${total}
+
+Order No: ${restaurantOrderNo}
+
+You can cancel within 10 minutes using:
+cancel ${orderId}`;
+
+    // 🔹 Clear session
     delete userState[from];
 
-    return res.send(`<Response><Message>Order placed ✅\nOrder ID: ${result.rows[0].id}</Message></Response>`);
-  }
+    return res.send(`<Response><Message>${reply}</Message></Response>`);
 
+  } catch (err) {
+
+    console.error("CONFIRM ERROR:", err);
+
+    return res.send(`
+      <Response>
+        <Message>Something went wrong. Please try again.</Message>
+      </Response>
+    `);
+  }
+}
   /* =======================
   ITEM ADD
   ======================= */
