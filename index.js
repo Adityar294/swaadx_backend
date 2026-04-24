@@ -534,14 +534,18 @@ app.get("/dashboard/orders", restaurantAuth, async (req, res) => {
 });
 
 
-app.post(
-  "/dashboard/orders/:id/status/:status",
-  restaurantAuth,
-  async (req, res) => {
+app.post("/dashboard/orders/:id/status/:status", restaurantAuth, async (req, res) => {
+
+  try {
+    console.log("🔥 API HIT");
 
     const restaurantId = req.restaurant.id;
     const orderId = Number(req.params.id);
     const status = req.params.status;
+
+    console.log("Order ID:", orderId);
+    console.log("Status:", status);
+    console.log("Restaurant ID:", restaurantId);
 
     const result = await pool.query(
       `UPDATE orders
@@ -550,14 +554,20 @@ app.post(
       [status, orderId, restaurantId]
     );
 
+    console.log("Rows updated:", result.rowCount);
+
     if (!result.rowCount) {
       return res.status(404).json({ error: "Order not found" });
     }
 
     res.json({ success: true });
 
+  } catch (err) {
+    console.error("UPDATE ERROR:", err);
+
+    res.status(500).json({ error: "Internal Server Error" });
   }
-);
+});
 /* =======================
 SESSION CLEANUP
 ======================= */
