@@ -98,7 +98,7 @@ WHATSAPP WEBHOOK
 ======================= */
 
 app.post("/whatsapp", async (req, res) => {
-
+console.log("Incoming:", message);
   const from = req.body.From;
   const messageRaw = (req.body.Body || "").trim();
   const message = messageRaw.toLowerCase();
@@ -399,6 +399,7 @@ You can type anytime:
   }
 
   return res.send(`<Response><Message>Type *menu* to see menu</Message></Response>`);
+  console.log("Reached end fallback");
 });
 /* =======================
 DASHBOARD APIs
