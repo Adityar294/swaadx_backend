@@ -356,7 +356,7 @@ Type *hi* to see the menu 🍽️</Message>
         `INSERT INTO orders
         (restaurant_id,phone,items,order_status,delivery_type,address_text,
         order_total_items,subtotal_amount,tax_amount,total_amount,restaurant_order_no)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         RETURNING id`,
         [
           RESTAURANT_ID,
