@@ -105,96 +105,79 @@ app.post("/whatsapp", async (req, res) => {
 
   let reply = "";
 
-/* =======================
-CANCEL / RESET LOGIC
-======================= */
+  /* =======================
+  CANCEL / RESET LOGIC
+  ======================= */
 
-if (message.startsWith("cancel")) {
+  if (message.startsWith("cancel")) {
 
-  const parts = message.split(" ");
+    const parts = message.split(" ");
 
-  // 🔴 Case 1: cancel order → "cancel 12"
-  if (parts.length > 1) {
+    // cancel order
+    if (parts.length > 1) {
 
-    const orderId = Number(parts[1]);
+      const orderId = Number(parts[1]);
 
-    if (!orderId) {
-      return res.send(`<Response><Message>Invalid format. Use: cancel 123</Message></Response>`);
+      if (!orderId) {
+        return res.send(`<Response><Message>Invalid format. Use: cancel 123</Message></Response>`);
+      }
+
+      const { rows } = await pool.query(
+        `SELECT created_at FROM orders WHERE id=$1`,
+        [orderId]
+      );
+
+      if (!rows.length) {
+        return res.send(`<Response><Message>Order not found</Message></Response>`);
+      }
+
+      const created = new Date(rows[0].created_at);
+      const diff = (Date.now() - created) / 60000;
+
+      if (diff > 10) {
+        return res.send(`<Response><Message>Cancel window expired</Message></Response>`);
+      }
+
+      await pool.query(
+        `UPDATE orders SET order_status='CANCELLED' WHERE id=$1`,
+        [orderId]
+      );
+
+      return res.send(`<Response><Message>Order cancelled ✅</Message></Response>`);
     }
 
-    const { rows } = await pool.query(
-      `SELECT created_at FROM orders WHERE id=$1`,
-      [orderId]
-    );
+    // reset session
+    delete userState[from];
 
-    if (!rows.length) {
-      return res.send(`<Response><Message>Order not found</Message></Response>`);
-    }
-
-    const created = new Date(rows[0].created_at);
-    const now = new Date();
-    const diff = (now - created) / 60000;
-
-    if (diff > 10) {
-      return res.send(`<Response><Message>Cancel window expired</Message></Response>`);
-    }
-
-    await pool.query(
-      `UPDATE orders SET order_status='CANCELLED' WHERE id=$1`,
-      [orderId]
-    );
-
-    return res.send(`<Response><Message>Order cancelled ✅</Message></Response>`);
+    return res.send(`<Response><Message>Session cancelled ❌\n\nScan QR again to start</Message></Response>`);
   }
 
-  // 🟢 Case 2: cancel (no id) → reset session
-  delete userState[from];
+  if (message === "restart" || message === "reset") {
 
-  return res.send(`
-    <Response>
-      <Message>
-Session cancelled ❌
+    delete userState[from];
 
-Type ORDER_RESTRO_<id> to start again
-      </Message>
-    </Response>
-  `);
-}
+    return res.send(`<Response><Message>Session restarted 🔄\n\nScan QR again</Message></Response>`);
+  }
 
+  /* =======================
+  SESSION INIT
+  ======================= */
 
-/* =======================
-RESTART / RESET COMMANDS
-======================= */
+  if (!userState[from]) {
+    userState[from] = {
+      step: "START",
+      cart: [],
+      awaitingDeliveryType: false,
+      awaitingAddress: false,
+      deliveryType: null,
+      addressText: null,
+      restaurantId: null,
+      lastActive: Date.now()
+    };
+  }
 
-if (message === "restart" || message === "reset") {
-
-  delete userState[from];
-
-  return res.send(`
-    <Response>
-      <Message>
-Session restarted 🔄
-
-Scan QR again to order
-      </Message>
-    </Response>
-  `);
-}
-if (!userState[from]) {
-  userState[from] = {
-    step: "START",
-    cart: [],
-    awaitingDeliveryType: false,
-    awaitingAddress: false,
-    deliveryType: null,
-    addressText: null,
-    restaurantId: null,
-    lastActive: Date.now()
-  };
-}
-
-const state = userState[from];
-state.lastActive = Date.now();
+  const state = userState[from];
+  state.lastActive = Date.now();
 
   /* =======================
   IDENTIFIER HANDLING
@@ -205,13 +188,7 @@ state.lastActive = Date.now();
     const extractedId = extractRestaurantIdFromMessage(message);
 
     if (!extractedId) {
-
-      return res.send(`
-        <Response>
-          <Message>Please scan the restaurant QR code to start ordering 📲</Message>
-        </Response>
-      `);
-
+      return res.send(`<Response><Message>Please scan the restaurant QR code to start ordering 📲</Message></Response>`);
     }
 
     const { rows } = await pool.query(
@@ -220,376 +197,208 @@ state.lastActive = Date.now();
     );
 
     if (!rows.length) {
-
-      return res.send(`
-        <Response>
-          <Message>Invalid restaurant code ❌</Message>
-        </Response>
-      `);
-
+      return res.send(`<Response><Message>Invalid restaurant code ❌</Message></Response>`);
     }
 
     state.restaurantId = extractedId;
 
     return res.send(`
       <Response>
-        <Message>Welcome to ${rows[0].name} 👋
-Type *hi* to see the menu 🍽️</Message>
+        <Message>
+Welcome to ${rows[0].name} 👋
+
+Type *hi* to see the menu 🍽️
+        </Message>
       </Response>
     `);
-
   }
 
   const RESTAURANT_ID = state.restaurantId;
 
   /* =======================
-  GLOBAL COMMANDS
-  ======================= */
-
-  // if (message === "restart" || message === "cancel session") {
-
-  //   delete userState[from];
-
-  //   return res.send(`
-  //     <Response>
-  //       <Message>Session cleared. Type *hi* to start again.</Message>
-  //     </Response>
-  //   `);
-
-  // }
-
-  if (message === "cart") {
-
-    if (!state.cart.length) {
-
-      reply = "Your cart is empty 🛒";
-
-    } else {
-
-      reply = "Your cart 🛒\n";
-
-      state.cart.forEach((item, index) => {
-        reply += `${index + 1}. ${item.item_name} × ${item.qty} = ₹${item.subtotal}\n`;
-      });
-
-      reply += "\nType *confirm* to proceed";
-
-    }
-
-    return res.send(`<Response><Message>${reply}</Message></Response>`);
-
-  }
-
-  /* =======================
-  ADDRESS
-  ======================= */
-
-  if (state.awaitingAddress) {
-
-    if (messageRaw.length < 10) {
-
-      reply = "Please enter a complete address";
-
-    } else {
-
-      state.addressText = messageRaw;
-      state.awaitingAddress = false;
-
-      reply = "Address saved ✅\nType *confirm* to place order";
-
-    }
-
-    return res.send(`<Response><Message>${reply}</Message></Response>`);
-
-  }
-
-  /* =======================
-  DELIVERY TYPE
-  ======================= */
-
-  if (state.awaitingDeliveryType) {
-
-    if (message === "1") {
-
-      state.deliveryType = "delivery";
-      state.awaitingDeliveryType = false;
-      state.awaitingAddress = true;
-
-      reply = "Please enter delivery address";
-
-    }
-
-    else if (message === "2") {
-
-      state.deliveryType = "pickup";
-      state.awaitingDeliveryType = false;
-
-      reply = "Pickup selected ✅\nType *confirm*";
-
-    }
-
-    else {
-
-      reply = "Reply with 1 for Delivery or 2 for Pickup";
-
-    }
-
-    return res.send(`<Response><Message>${reply}</Message></Response>`);
-
-  }
-
-  /* =======================
-  CONFIRM ORDER
-  ======================= */
-
-  if (message === "confirm") {
-
-    if (!state.cart.length) {
-
-      return res.send(`<Response><Message>Your cart is empty</Message></Response>`);
-
-    }
-
-    if (!state.deliveryType) {
-
-      state.awaitingDeliveryType = true;
-
-      return res.send(`
-        <Response>
-          <Message>
-1️⃣ Delivery
-2️⃣ Pickup
-          </Message>
-        </Response>
-      `);
-
-    }
-
-    if (state.deliveryType === "delivery" && !state.addressText) {
-
-      state.awaitingAddress = true;
-
-      return res.send(`<Response><Message>Please enter delivery address</Message></Response>`);
-
-    }
-
-    try {
-
-      const subtotal = state.cart.reduce((s, i) => s + i.subtotal, 0);
-      const tax = Number((subtotal * TAX_RATE).toFixed(2));
-      const total = Number((subtotal + tax).toFixed(2));
-      const totalItems = state.cart.reduce((s, i) => s + i.qty, 0);
-      const orderNoRes = await pool.query(
-        `SELECT COALESCE(MAX(restaurant_order_no), 0) + 1 AS next_no
-        FROM orders
-        WHERE restaurant_id = $1`,
-      [RESTAURANT_ID]
-);
-
-      const restaurantOrderNo = orderNoRes.rows[0].next_no;
-      
-      const result = await pool.query(
-        `INSERT INTO orders
-        (restaurant_id,phone,items,order_status,delivery_type,address_text,
-        order_total_items,subtotal_amount,tax_amount,total_amount,restaurant_order_no)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        RETURNING id`,
-        [
-          RESTAURANT_ID,
-          from,
-          JSON.stringify(state.cart),
-          "NEW",
-          state.deliveryType,
-          state.addressText,
-          totalItems,
-          subtotal,
-          tax,
-          total,
-          restaurantOrderNo
-        ]
-      );
-
-      const orderId = result.rows[0].id;
-
-      /* =======================
-      RESTAURANT NOTIFICATION
-      (COMMENTED UNTIL GUPSHUP SETUP)
-      ======================= */
-
-      /*
-      const restro = await pool.query(
-        `SELECT phone FROM restaurants WHERE id=$1`,
-        [RESTAURANT_ID]
-      );
-
-      const restroPhone = restro.rows[0].phone;
-
-      sendWhatsappMessage(restroPhone, `New order ${orderId}`);
-      */
-
-      reply = `Order confirmed 🎉
-
-Order ID: ${orderId}
-Total: ₹${total}
-
-You can cancel within 10 minutes using:
-cancel ${orderId}`;
-
-      delete userState[from];
-
-    } catch (err) {
-
-      console.error(err);
-      reply = "Something went wrong";
-
-    }
-
-    return res.send(`<Response><Message>${reply}</Message></Response>`);
-
-  }
-
-  /* =======================
-  CANCEL ORDER
-  ======================= */
-
-  if (message.startsWith("cancel")) {
-
-    const parts = message.split(" ");
-    const orderId = Number(parts[1]);
-
-    const { rows } = await pool.query(
-      `SELECT created_at FROM orders WHERE id=$1`,
-      [orderId]
-    );
-
-    if (!rows.length) {
-
-      return res.send(`<Response><Message>Order not found</Message></Response>`);
-
-    }
-
-    const created = new Date(rows[0].created_at);
-    const now = new Date();
-
-    const diff = (now - created) / 60000;
-
-    if (diff > 10) {
-
-      return res.send(`<Response><Message>Cancel window expired</Message></Response>`);
-
-    }
-
-    await pool.query(
-      `UPDATE orders SET order_status='CANCELLED' WHERE id=$1`,
-      [orderId]
-    );
-
-    return res.send(`<Response><Message>Order cancelled</Message></Response>`);
-
-  }
-
-  /* =======================
   MENU FLOW
   ======================= */
 
- if (message === "hi" || message === "menu") {
+  if (message === "hi" || message === "menu") {
 
-  // 🔹 Get menu image URL
-  const menuRes = await pool.query(
-    `SELECT menu_image_url FROM restaurants WHERE id=$1`,
-    [RESTAURANT_ID]
-  );
+    const menuRes = await pool.query(
+      `SELECT menu_image_url FROM restaurants WHERE id=$1`,
+      [RESTAURANT_ID]
+    );
 
-  const imageUrl = menuRes.rows[0]?.menu_image_url;
+    const imageUrl = menuRes.rows[0]?.menu_image_url;
 
-  // 🔹 If image exists → send image
-  if (imageUrl) {
-    return res.send(`
-      <Response>
-        <Message>
-          <Body>
+    if (imageUrl) {
+      return res.send(`
+        <Response>
+          <Message>
+            <Body>
 Menu 🍽️
 
 Order using:
 1-2
 3-1
 
-Example:
-1-2
-3-1
-
 You can type anytime:
 
-• cancel → reset your order ❌  
-• restart → start fresh 🔄  
-• cancel <order_id> → cancel placed order
-          </Body>
-          <Media>${imageUrl}</Media>
-        </Message>
-      </Response>
-    `);
+• cancel → reset ❌  
+• restart → fresh 🔄  
+• cancel <order_id> → cancel order
+            </Body>
+            <Media>${imageUrl}</Media>
+          </Message>
+        </Response>
+      `);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT item_no, item_name, price
+       FROM menu
+       WHERE restaurant_id=$1 AND is_active=true
+       ORDER BY item_no`,
+      [RESTAURANT_ID]
+    );
+
+    reply = buildMenuText(rows);
+
+    return res.send(`<Response><Message>${reply}</Message></Response>`);
   }
 
-  // 🔹 Fallback (if image missing)
-  const { rows } = await pool.query(
-    `SELECT item_no, item_name, price
-     FROM menu
-     WHERE restaurant_id=$1 AND is_active=true
-     ORDER BY item_no`,
-    [RESTAURANT_ID]
-  );
-
-  reply = buildMenuText(rows);
-
-  return res.send(`<Response><Message>${reply}</Message></Response>`);
-}
-
   /* =======================
-  ITEM ADDING
+  CART
   ======================= */
 
-  const parsedItems = parseMultipleItems(message);
+  if (message === "cart") {
 
-  if (parsedItems) {
+    if (!state.cart.length) {
+      reply = "Your cart is empty 🛒";
+    } else {
+      reply = "Your cart 🛒\n";
+      state.cart.forEach((i, idx) => {
+        reply += `${idx + 1}. ${i.item_name} × ${i.qty} = ₹${i.subtotal}\n`;
+      });
+      reply += "\nType *confirm* to proceed";
+    }
 
-    for (const p of parsedItems) {
+    return res.send(`<Response><Message>${reply}</Message></Response>`);
+  }
+
+  /* =======================
+  DELIVERY FLOW
+  ======================= */
+
+  if (state.awaitingAddress) {
+    state.addressText = messageRaw;
+    state.awaitingAddress = false;
+    return res.send(`<Response><Message>Address saved ✅\nType *confirm*</Message></Response>`);
+  }
+
+  if (state.awaitingDeliveryType) {
+
+    if (message === "1") {
+      state.deliveryType = "delivery";
+      state.awaitingDeliveryType = false;
+      state.awaitingAddress = true;
+      return res.send(`<Response><Message>Enter delivery address</Message></Response>`);
+    }
+
+    if (message === "2") {
+      state.deliveryType = "pickup";
+      state.awaitingDeliveryType = false;
+      return res.send(`<Response><Message>Pickup selected ✅\nType *confirm*</Message></Response>`);
+    }
+
+    return res.send(`<Response><Message>Reply 1 or 2</Message></Response>`);
+  }
+
+  /* =======================
+  CONFIRM
+  ======================= */
+
+  if (message === "confirm") {
+
+    if (!state.cart.length) {
+      return res.send(`<Response><Message>Your cart is empty</Message></Response>`);
+    }
+
+    if (!state.deliveryType) {
+      state.awaitingDeliveryType = true;
+      return res.send(`<Response><Message>1 Delivery\n2 Pickup</Message></Response>`);
+    }
+
+    const subtotal = state.cart.reduce((s, i) => s + i.subtotal, 0);
+    const tax = subtotal * TAX_RATE;
+    const total = subtotal + tax;
+
+    const orderNoRes = await pool.query(
+      `SELECT COALESCE(MAX(restaurant_order_no),0)+1 AS next_no FROM orders WHERE restaurant_id=$1`,
+      [RESTAURANT_ID]
+    );
+
+    const restaurantOrderNo = orderNoRes.rows[0].next_no;
+
+    const result = await pool.query(
+      `INSERT INTO orders
+      (restaurant_id, phone, items, order_status,
+       delivery_type, address_text,
+       order_total_items,
+       subtotal_amount, tax_amount, total_amount,
+       restaurant_order_no)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      RETURNING id`,
+      [
+        RESTAURANT_ID,
+        from,
+        JSON.stringify(state.cart),
+        "NEW",
+        state.deliveryType,
+        state.addressText,
+        state.cart.length,
+        subtotal,
+        tax,
+        total,
+        restaurantOrderNo
+      ]
+    );
+
+    delete userState[from];
+
+    return res.send(`<Response><Message>Order placed ✅\nOrder ID: ${result.rows[0].id}</Message></Response>`);
+  }
+
+  /* =======================
+  ITEM ADD
+  ======================= */
+
+  const parsed = parseMultipleItems(message);
+
+  if (parsed) {
+
+    for (const p of parsed) {
 
       const { rows } = await pool.query(
-        `SELECT item_name,price
-        FROM menu
-        WHERE restaurant_id=$1 AND item_no=$2`,
+        `SELECT item_name, price FROM menu WHERE restaurant_id=$1 AND item_no=$2`,
         [RESTAURANT_ID, p.itemNo]
       );
 
       if (!rows.length) {
-
         return res.send(`<Response><Message>Invalid item ${p.itemNo}</Message></Response>`);
-
       }
 
-      const unit = Number(rows[0].price);
-      const subtotal = Number((unit * p.qty).toFixed(2));
+      const price = rows[0].price;
+      const subtotal = price * p.qty;
 
       state.cart.push({
-        item_no: p.itemNo,
         item_name: rows[0].item_name,
-        unit_price: unit,
         qty: p.qty,
         subtotal
       });
-
     }
 
-    reply = "Items added to cart ✅\nType *cart* or *confirm*";
-
-    return res.send(`<Response><Message>${reply}</Message></Response>`);
-
+    return res.send(`<Response><Message>Added to cart ✅\nType cart or confirm</Message></Response>`);
   }
 
-  reply = "Type *menu* to see menu";
-
-  res.send(`<Response><Message>${reply}</Message></Response>`);
-
+  return res.send(`<Response><Message>Type *menu* to see menu</Message></Response>`);
 });
 /* =======================
 DASHBOARD APIs
