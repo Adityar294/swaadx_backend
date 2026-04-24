@@ -180,8 +180,21 @@ Scan QR again to order
     </Response>
   `);
 }
-  const state = userState[from];
-  state.lastActive = Date.now();
+if (!userState[from]) {
+  userState[from] = {
+    step: "START",
+    cart: [],
+    awaitingDeliveryType: false,
+    awaitingAddress: false,
+    deliveryType: null,
+    addressText: null,
+    restaurantId: null,
+    lastActive: Date.now()
+  };
+}
+
+const state = userState[from];
+state.lastActive = Date.now();
 
   /* =======================
   IDENTIFIER HANDLING
